@@ -199,6 +199,61 @@ describe("conventional preset", () => {
 	});
 });
 
+describe("git-commit", () => {
+	const moving = () =>
+		conventional({
+			"github-release": false,
+			"git-commit": { move: ["v{major}", "v{major}.{minor}"] },
+		});
+
+	it("moves tags to the release and force-pushes them", async () => {
+		const old = await git(cwd, "rev-parse", "HEAD~1");
+		await git(cwd, "tag", "v2", old);
+		await git(cwd, "push", "origin", "refs/tags/v2");
+
+		const report = await defineRelease({ steps: moving() }).run({
+			cwd,
+			reporter: null,
+		});
+
+		expect(report.records.at(-1)?.reason).toMatch(
+			/^committed [0-9a-f]{7}, tagged v2\.0\.0, moved v2, v2\.0 and pushed to origin$/,
+		);
+		const head = await git(cwd, "rev-parse", "HEAD");
+		for (const tag of ["v2.0.0", "v2", "v2.0"]) {
+			expect(await git(cwd, "rev-parse", `${tag}^{commit}`)).toBe(head);
+			expect(await git(remote, "rev-parse", `${tag}^{commit}`)).toBe(head);
+		}
+	});
+
+	it("says which tags it would move in a dry run", async () => {
+		const report = await defineRelease({ steps: moving() }).run({
+			cwd,
+			dryRun: true,
+			reporter: null,
+		});
+		expect(report.records.at(-1)?.reason).toBe(
+			"would commit package.json, CHANGELOG.md, tag v2.0.0, move v2, v2.0 and push to origin",
+		);
+		expect(await git(cwd, "tag")).toBe("");
+	});
+
+	it("rejects unknown placeholders", async () => {
+		const error = await defineRelease({
+			steps: conventional({
+				"github-release": false,
+				"git-commit": { move: ["v{build}"] },
+			}),
+		})
+			.run({ cwd, dryRun: true, reporter: null })
+			.catch((e: unknown) => e);
+		expect(error).toBeInstanceOf(ReleaseError);
+		expect((error as ReleaseError).message).toMatch(
+			"unknown placeholder {build} in 'v{build}'; use {version} or {major} or {minor} or {patch}",
+		);
+	});
+});
+
 describe("previous-version steps", () => {
 	const versionOf = async (
 		steps: Parameters<typeof defineRelease>[0]["steps"],

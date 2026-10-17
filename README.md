@@ -133,6 +133,8 @@ export default defineStep({
 });
 ```
 
+Steps that run git can use `git(env.cwd, ...args)`, which resolves with its trimmed output and fails with git's own error, or `tryGit`, which resolves with `undefined` instead of failing.
+
 `definePreset({ name, steps })` bundles factories, like `steps.conventional`, and takes options per step by name.
 
 Steps given inline to `defineRelease` are plain `{ type, name, run }` objects, typed from their `type`.
@@ -236,8 +238,9 @@ Commits the files earlier release steps changed, tags the commit and pushes both
 | Option | Type | Default | |
 |---|---|---|---|
 | `files` | `string[]` | `[]` | More files to commit, relative to the working directory. |
-| `message` | `string` | `chore(release): v{version}` | The commit and tag message; `{version}` is filled in. |
-| `tag` | `string \| false` | `v{version}` | The tag; `false` skips tagging. |
+| `message` | `string` | `chore(release): v{version}` | The commit and tag message; `{version}`, `{major}`, `{minor}` and `{patch}` are filled in. |
+| `tag` | `string \| false` | `v{version}` | The tag, with the same placeholders; it must be new. `false` skips tagging. |
+| `move` | `string[]` | `[]` | Tags to create or move to the release, e.g. `v{major}`; force-pushed. |
 | `push` | `string \| false` | `origin` | The remote to push to; `false` skips pushing. |
 
 #### `github-release` · `release`

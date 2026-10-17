@@ -1,6 +1,7 @@
 import { defineStep } from "../define.ts";
 import { z } from "../options.ts";
 import { git, tryGit } from "../utils/git.ts";
+import { parseVersion } from "../utils/semver.ts";
 import { fill } from "../utils/template.ts";
 import { joinList } from "../utils/text.ts";
 
@@ -10,6 +11,9 @@ const BOT_IDENTITY = [
 	"-c",
 	"user.email=41898282+github-actions[bot]@users.noreply.github.com",
 ];
+
+const PLACEHOLDERS =
+	"`{version}`, `{major}`, `{minor}` and `{patch}` are filled in";
 
 /**
  * Commits the files that earlier `release` steps changed, tags the commit and
@@ -29,11 +33,19 @@ export const gitCommit = defineStep({
 		message: z
 			.string()
 			.default("chore(release): v{version}")
-			.describe("The commit and tag message; `{version}` is filled in."),
+			.describe(`The commit and tag message; ${PLACEHOLDERS}.`),
 		tag: z
 			.union([z.string(), z.literal(false)])
 			.default("v{version}")
-			.describe("The tag; `false` skips tagging."),
+			.describe(
+				"The tag, with the same placeholders; it must be new. `false` skips tagging.",
+			),
+		move: z
+			.array(z.string())
+			.default([])
+			.describe(
+				"Tags to create or move to the release, e.g. `v{major}`; force-pushed.",
+			),
 		push: z
 			.union([z.string(), z.literal(false)])
 			.default("origin")
@@ -41,7 +53,14 @@ export const gitCommit = defineStep({
 	},
 	run: async ({ env, version, releases, options }) => {
 		const remote = options.push;
-		const message = fill(options.message, { version });
+		const { major, minor, patch } = parseVersion(version);
+		const vars = {
+			version,
+			major: String(major),
+			minor: String(minor),
+			patch: String(patch),
+		};
+		const message = fill(options.message, vars);
 		const files = [
 			...new Set([
 				...releases.flatMap((release) => release.files),
@@ -51,16 +70,17 @@ export const gitCommit = defineStep({
 		if (files.length === 0) {
 			throw new Error("no files to commit; no earlier step reported any");
 		}
-		const tag =
-			options.tag === false ? undefined : fill(options.tag, { version });
+		const tag = options.tag === false ? undefined : fill(options.tag, vars);
+		const moved = [...new Set(options.move.map((name) => fill(name, vars)))];
 		const plan = [
 			`commit ${files.join(", ")}`,
 			...(tag ? [`tag ${tag}`] : []),
+			...(moved.length ? [`move ${moved.join(", ")}`] : []),
 			...(remote ? [`push to ${remote}`] : []),
 		];
 		if (env.dryRun) {
 			return {
-				output: { commit: null, tag: tag ?? null, pushed: false },
+				output: { commit: null, tag: tag ?? null, moved, pushed: false },
 				reason: `would ${joinList(plan)}`,
 			};
 		}
@@ -82,7 +102,10 @@ export const gitCommit = defineStep({
 		if (tag) {
 			await git(cwd, ...identity, "tag", "-a", tag, "-m", message);
 		}
+		for (const name of moved) await git(cwd, "tag", "-f", name, "HEAD");
 		if (remote) {
+			// One atomic push, so a release lands entirely or not at all. Only the
+			// moved tags are forced.
 			await git(
 				cwd,
 				"push",
@@ -90,13 +113,15 @@ export const gitCommit = defineStep({
 				remote,
 				"HEAD",
 				...(tag ? [`refs/tags/${tag}`] : []),
+				...moved.map((name) => `+refs/tags/${name}`),
 			);
 		}
 		return {
-			output: { commit, tag: tag ?? null, pushed: remote !== false },
+			output: { commit, tag: tag ?? null, moved, pushed: remote !== false },
 			reason: joinList([
 				`committed ${commit.slice(0, 7)}`,
 				...(tag ? [`tagged ${tag}`] : []),
+				...(moved.length ? [`moved ${moved.join(", ")}`] : []),
 				...(remote ? [`pushed to ${remote}`] : []),
 			]),
 		};

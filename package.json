@@ -1,5 +1,6 @@
 {
 	"name": "rylease",
+	"version": "1.0.0",
 	"type": "module",
 	"description": "A release pipeline that doesn't fight you.",
 	"main": "./dist/index.cjs",
