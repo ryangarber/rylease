@@ -45,7 +45,7 @@ rylease release · main · /home/runner/work/project/project
   ✔ release-changes   conventional-commits  12ms  3 changes in 2 commits since 0d92bfa
   ✔ release-kind      conventional-kind     <1ms  'feat' in title (commit 3a7a7e3)
   ✔ release-version   semver                <1ms  'minor' from 1.0.0
-  ✔ release-notes     conventional-notes    <1ms  minor release; features: 1, fixes: 1, other: 1
+  ✔ release-notes     conventional-notes    <1ms  minor release; features: 1, bug fixes: 1, other: 1
   ✔ release           write-package-json    <1ms  wrote 1.1.0 to package.json
   ✔ release           git-commit            92ms  committed 5be1c2a, tagged v1.1.0 and pushed to origin
   ✔ release           github-release       410ms  created release v1.1.0: https://github.com/me/project/releases/tag/v1.1.0
@@ -96,7 +96,7 @@ await defineRelease({
 | Type | Receives (plus `env`, `context`, `history`) | Returns |
 |---|---|---|
 | `previous-version` | `previousVersion?`, `previousRef?` | `{ version, ref?, reason }` |
-| `release-changes` | `previousVersion`, `previousRef?`, `changes?` | `{ changes: { title?, description?, reason }[], reason }` |
+| `release-changes` | `previousVersion`, `previousRef?`, `changes?` | `{ changes: { title?, description?, reason, link? }[], reason }` |
 | `release-kind` | … `changes`, `kind?` | `{ kind: "major" \| "minor" \| "patch" \| "none", reason }` |
 | `release-version` | … `kind` (never `"none"`), `version?` | `{ version, reason }` |
 | `release-notes` | … `version`, `notes?` | `{ notes, reason }` |
@@ -207,12 +207,14 @@ Bumps the previous version by the kind: `MAJOR.minor.patch`, or `0.MAJOR.minorOr
 
 #### `conventional-notes` · `release-notes`
 
-A `## Features` and a `## Fixes` section, then `## Other` for everything else.
+`## Breaking Changes`, `## Features`, `## Bug Fixes`, `## Performance Improvements` and `## Reverts` sections, then `## Other` for everything else.
 
 | Option | Type | Default | |
 |---|---|---|---|
-| `sections` | `{ title: string, types: string[] }[]` | `[{ title: Features, types: [feat] }, { title: Fixes, types: [fix] }]` | Sections in order; a change goes in the first that lists its type. |
+| `sections` | `{ title: string, types: string[] }[]` | `[{ title: Features, types: [feat] }, { title: Bug Fixes, types: [fix] }, { title: Performance Improvements, types: [perf] }, { title: Reverts, types: [revert] }]` | Sections in order; a change goes in the first that lists its type. |
+| `breaking` | `string \| false` | `Breaking Changes` | The first section, for breaking changes of any type; `false` marks them **(breaking)** in their own section instead. |
 | `other` | `string \| false` | `Other` | The section for remaining changes; `false` leaves them out. |
+| `links` | `boolean` | `true` | Link each change to its source, e.g. its commit. |
 
 #### `write-package-json` · `release`
 

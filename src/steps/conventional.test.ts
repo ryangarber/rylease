@@ -30,6 +30,8 @@ function releaseSteps() {
 }
 
 beforeEach(async () => {
+	// Without a GitHub repository, changes aren't linked.
+	vi.stubEnv("GITHUB_REPOSITORY", "");
 	root = await mkdtemp(join(tmpdir(), "rylease-"));
 	cwd = join(root, "work");
 	remote = join(root, "remote.git");
@@ -55,6 +57,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
 	vi.unstubAllGlobals();
+	vi.unstubAllEnvs();
 	await rm(root, { recursive: true, force: true });
 });
 
@@ -78,7 +81,7 @@ describe("conventional preset", () => {
 			expect.stringMatching(/^3 changes in 3 commits since [0-9a-f]{7}$/),
 			expect.stringMatching(/^'fix\(x\)!' in title \(commit [0-9a-f]{7}\)$/),
 			"'major' from 1.0.0",
-			"major release; features: 2, fixes: 1, other: 0",
+			"major release; breaking changes: 1, features: 2",
 			"wrote 2.0.0 to package.json",
 			"created CHANGELOG.md",
 			expect.stringMatching(
@@ -88,14 +91,14 @@ describe("conventional preset", () => {
 		]);
 
 		const notes = [
+			"## Breaking Changes",
+			"",
+			"- **x:** change b",
+			"",
 			"## Features",
 			"",
 			"- add c",
 			"- add a",
-			"",
-			"## Fixes",
-			"",
-			"- **x:** change b **(breaking)**",
 		].join("\n");
 		expect(report.notes).toBe(notes);
 		expect(await readFile(join(cwd, "package.json"), "utf8")).toBe(
@@ -246,6 +249,26 @@ describe("git-commit", () => {
 		expect(error).toBeInstanceOf(ReleaseError);
 		expect((error as ReleaseError).message).toMatch(
 			"unknown placeholder {build} in 'v{build}'; use {version} or {major} or {minor} or {patch}",
+		);
+	});
+});
+
+describe("conventional-commits", () => {
+	it("links each change to its commit on GitHub", async () => {
+		vi.stubEnv("GITHUB_REPOSITORY", "me/demo");
+		vi.stubEnv("GITHUB_SERVER_URL", "https://git.example.com");
+		const report = await defineRelease({ steps: releaseSteps() }).run({
+			cwd,
+			dryRun: true,
+			reporter: null,
+		});
+		const squashed = await git(cwd, "rev-parse", "HEAD");
+		const short = squashed.slice(0, 7);
+		expect(report.notes).toContain(
+			`- **x:** change b ([${short}](https://git.example.com/me/demo/commit/${squashed}))`,
+		);
+		expect(report.notes).toContain(
+			`- add c ([${short}](https://git.example.com/me/demo/commit/${squashed}))`,
 		);
 	});
 });

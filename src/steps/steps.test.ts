@@ -151,7 +151,7 @@ describe("conventionalNotes", () => {
 		expect(output.reason).toBe("patch release; dependencies: 2");
 	});
 
-	it("groups changes into features, fixes and other", async () => {
+	it("groups changes into breaking changes, types and other", async () => {
 		const output = await run(conventionalNotes(), {
 			previousVersion: "1.0.0",
 			kind: "major",
@@ -159,21 +159,36 @@ describe("conventionalNotes", () => {
 			changes: [
 				change("feat(api)!: drop node 18"),
 				change("fix: handle nulls"),
+				change("perf: faster"),
+				change("revert: undo thing"),
 				change("chore(deps): bump vitest"),
+				change("fix: old api", "BREAKING CHANGE: gone"),
 				change("feat: add thing"),
 				{ description: "Untitled change\nmore", reason: "issue #3" },
 			],
 		});
 		expect(output.notes).toBe(
 			[
+				"## Breaking Changes",
+				"",
+				"- **api:** drop node 18",
+				"- old api",
+				"",
 				"## Features",
 				"",
-				"- **api:** drop node 18 **(breaking)**",
 				"- add thing",
 				"",
-				"## Fixes",
+				"## Bug Fixes",
 				"",
 				"- handle nulls",
+				"",
+				"## Performance Improvements",
+				"",
+				"- faster",
+				"",
+				"## Reverts",
+				"",
+				"- undo thing",
 				"",
 				"## Other",
 				"",
@@ -182,7 +197,38 @@ describe("conventionalNotes", () => {
 			].join("\n"),
 		);
 		expect(output.reason).toBe(
-			"major release; features: 2, fixes: 1, other: 2",
+			"major release; breaking changes: 2, features: 1, bug fixes: 1, performance improvements: 1, reverts: 1, other: 2",
+		);
+	});
+
+	it("can mark breaking changes in their own section instead", async () => {
+		const output = await run(conventionalNotes({ breaking: false }), {
+			previousVersion: "1.0.0",
+			kind: "major",
+			version: "2.0.0",
+			changes: [change("feat(api)!: drop node 18"), change("feat: add thing")],
+		});
+		expect(output.notes).toBe(
+			"## Features\n\n- **api:** drop node 18 **(breaking)**\n- add thing",
+		);
+	});
+
+	it("links changes to their source", async () => {
+		const linked: Change = {
+			...change("fix: handle nulls"),
+			link: { label: "abc1234", url: "https://example.com/c/abc1234" },
+		};
+		const input = {
+			previousVersion: "1.0.0",
+			kind: "patch" as const,
+			version: "1.0.1",
+			changes: [linked, change("fix: unlinked")],
+		};
+		expect((await run(conventionalNotes(), input)).notes).toBe(
+			"## Bug Fixes\n\n- handle nulls ([abc1234](https://example.com/c/abc1234))\n- unlinked",
+		);
+		expect((await run(conventionalNotes({ links: false }), input)).notes).toBe(
+			"## Bug Fixes\n\n- handle nulls\n- unlinked",
 		);
 	});
 });

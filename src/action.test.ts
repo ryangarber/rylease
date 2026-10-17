@@ -63,7 +63,9 @@ describe("action", () => {
 			"previous-version": "1.0.0",
 			version: "1.0.1",
 			kind: "patch",
-			notes: "## Fixes\n\n- a bug\n\n## Other\n\n- words",
+			notes: expect.stringMatching(
+				/^## Bug Fixes\n\n- a bug \(\[[0-9a-f]{7}\]\(https:\/\/github\.com\/me\/demo\/commit\/[0-9a-f]{40}\)\)\n\n## Other\n\n- words \(\[[0-9a-f]{7}\]\(.+\)\)$/,
+			),
 		});
 	});
 

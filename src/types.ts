@@ -23,6 +23,8 @@ export interface Change {
 	description?: string;
 	/** Where this change came from, e.g. `commit aefc3af`. */
 	reason: string;
+	/** Where to read more, e.g. `{ label: "aefc3af", url: ".../commit/aefc3af..." }`. */
+	link?: { label: string; url: string };
 }
 
 export interface VersionOutput {
