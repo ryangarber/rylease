@@ -1,32 +1,42 @@
 name: release
 
 on:
-  push:
-    branches: [main]
+  # Every push to main or dev that passes its checks dry-runs the release.
+  workflow_run:
+    workflows: [check]
+    types: [completed]
+    branches: [main, dev]
 
+  # Releases for real, from main.
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: release
+  # Under workflow_run, github.ref is always the default branch.
+  group: release-${{ github.event.workflow_run.head_branch || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
   release:
-    if: github.ref == 'refs/heads/main'
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
+    env:
+      DRY_RUN: ${{ github.event_name != 'workflow_dispatch' || github.ref_name != 'main' }}
 
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
           fetch-depth: 0
 
-      # Dry run on every push to main; release for real when dispatched.
       - uses: ./
         with:
-          dry-run: ${{ github.event_name != 'workflow_dispatch' }}
+          dry-run: ${{ env.DRY_RUN }}
           steps: |
             - uses: conventional
               with:

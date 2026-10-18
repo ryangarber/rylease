@@ -111,8 +111,7 @@ steps:
   - uses: actions/checkout@v7
     with:
       fetch-depth: 0
-  - uses: pnpm/setup@v3
-  - run: pnpm ci
+  - uses: pnpm/setup@v3 # installs dependencies too
   - uses: ryangarber/rylease@v2
     with:
       steps: |

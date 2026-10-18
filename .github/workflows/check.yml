@@ -1,9 +1,11 @@
-name: ci
+name: check
 
 on:
   push:
     
   pull_request:
+
+  workflow_dispatch:
 
 permissions:
   contents: read
