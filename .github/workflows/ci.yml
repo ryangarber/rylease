@@ -68,6 +68,7 @@ jobs:
           steps: |
             - conventional:
                 github-release: { repo: me/fixture }
+            - npm-publish
             - ./release/hello.ts:
                 to: ci
         

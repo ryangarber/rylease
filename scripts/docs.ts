@@ -3,8 +3,10 @@
  * definitions. Run with `pnpm gen:docs`; `--check` fails if README.md is stale.
  */
 import { readFile, writeFile } from "node:fs/promises";
+import type { AnyStepFactory } from "../src/define.ts";
 import { z } from "../src/options.ts";
 import { conventional } from "../src/presets/index.ts";
+import * as steps from "../src/steps/index.ts";
 
 interface Schema {
 	type?: string;
@@ -57,7 +59,10 @@ function flow(value: unknown): string {
 }
 
 function reference(): string {
-	const sections = conventional.steps.map((step) => {
+	const others = Object.values(steps).filter(
+		(step) => !conventional.steps.some((other) => other.name === step.name),
+	);
+	const section = (step: AnyStepFactory) => {
 		const schema = z.toJSONSchema(z.object(step.options), {
 			io: "input",
 		}) as Schema;
@@ -80,7 +85,12 @@ function reference(): string {
 			"|---|---|---|---|",
 			...rows,
 		].join("\n");
-	});
+	};
+	const sections = [
+		...conventional.steps.map(section),
+		"### More steps\n\nThese aren't in `conventional`; list them after it.",
+		...others.map(section),
+	];
 	return `${START}\n${sections.join("\n\n")}\n${END}`;
 }
 

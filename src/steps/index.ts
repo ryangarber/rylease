@@ -3,6 +3,7 @@ export * from "./conventional-kind.ts";
 export * from "./conventional-notes.ts";
 export * from "./git-commit.ts";
 export * from "./github-release.ts";
+export * from "./npm-publish.ts";
 export * from "./prepend-changelog.ts";
 export * from "./read-git-tag.ts";
 export * from "./read-package-json.ts";

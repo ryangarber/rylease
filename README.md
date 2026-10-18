@@ -67,6 +67,31 @@ rylease release · main · /home/runner/work/project/project
 
 Outputs: `status` (`released`, `unchanged` or `failed`), `released` (`true`/`false`), `previous-version`, `version`, `kind` and `notes`.
 
+### Publishing to npm
+
+Add `npm-publish` after `conventional`. It publishes with `pnpm` or `npm`, whichever the project uses, so lifecycle scripts like `prepublishOnly` run as usual. Install dependencies first, and set up pnpm if the project uses it.
+
+```yaml
+permissions:
+  contents: write
+  id-token: write # for trusted publishing, or provenance
+steps:
+  - uses: actions/checkout@v7
+    with:
+      fetch-depth: 0
+  - uses: pnpm/setup@v3
+  - run: pnpm ci
+  - uses: ryangarber/rylease@v1
+    with:
+      steps: |
+        - conventional
+        - npm-publish
+    env:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }} # not needed with trusted publishing
+```
+
+It publishes the version that `write-package-json` wrote, after the release is committed, tagged and pushed, and refuses to publish any other.
+
 ## TypeScript
 
 The same release, as a script:
@@ -257,4 +282,22 @@ Creates a GitHub release with the notes. Needs a token with `contents: write`.
 | `prerelease` | `boolean` | `false` |  |
 | `repo` | `string` |  | `owner/repo`; defaults to `GITHUB_REPOSITORY` or the `origin` remote. |
 | `token` | `string` |  | Defaults to `GITHUB_TOKEN` or `GH_TOKEN`. |
+
+### More steps
+
+These aren't in `conventional`; list them after it.
+
+#### `npm-publish` · `release`
+
+Publishes the package to the npm registry with `npm` or `pnpm publish`.
+
+| Option | Type | Default | |
+|---|---|---|---|
+| `path` | `string` | `.` | The package's directory, relative to the working directory. |
+| `client` | `npm \| pnpm` |  | Defaults to the `packageManager` in package.json, then `pnpm` if there's a `pnpm-lock.yaml`, then `npm`. |
+| `tag` | `string` |  | The dist-tag; defaults to `publishConfig.tag`, or `latest`. |
+| `access` | `public \| restricted` |  | Defaults to `publishConfig.access`. |
+| `provenance` | `boolean` | `false` | Publishes with a provenance statement; needs `id-token: write`. |
+| `registry` | `string` |  | Defaults to `publishConfig.registry`, or the npm registry. |
+| `token` | `string` |  | Defaults to `NPM_TOKEN` or `NODE_AUTH_TOKEN`; without one, the client's own auth is used, e.g. trusted publishing. |
 <!-- options:end -->
