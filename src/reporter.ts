@@ -85,7 +85,12 @@ export function prettyReporter(options: PrettyReporterOptions = {}): Reporter {
 				summary = `${paint("bold", from)} ${paint("dim", "·")} nothing to release`;
 			} else {
 				const action = dryRun ? paint("yellow", "would release") : "released";
-				summary = `${paint("bold", from)} → ${paint("green", paint("bold", report.version ?? "?"))} ${paint("dim", `(${report.kind})`)} ${paint("dim", "·")} ${action}`;
+				const to = paint("green", paint("bold", report.version ?? "?"));
+				// A given release may not say what it was released from.
+				summary =
+					from === report.version
+						? `${to} ${paint("dim", "·")} ${action}`
+						: `${paint("bold", from)} → ${to} ${paint("dim", `(${report.kind})`)} ${paint("dim", "·")} ${action}`;
 			}
 			write(`\n  ${summary}\n\n`);
 		},

@@ -79,3 +79,54 @@ jobs:
         run: |
           test "$STATUS" = released
           test "$VERSION" = 1.1.0
+
+  # Uploads for real what a dry run keeps, as a later job of a release would.
+  artifacts:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v7
+      
+      - name: Create test files
+        run: |
+          mkdir -p fixture/dist/nested
+          echo linux > "fixture/dist/app linux"
+          echo windows > fixture/dist/app.exe
+          echo '{}' > fixture/dist/nested/latest.json
+      
+      - id: upload
+        uses: ./
+        with:
+          working-directory: fixture
+          version: 1.2.0
+          dry-run: true
+          steps: |
+            - github-release-assets:
+                files: ["dist/app*"]
+                dryRunArtifact: true
+                artifactName: smoketest-assets-{version}
+            - github-artifact:
+                name: smoketest-dist
+                files: [dist]
+                dryRunArtifact: true
+                retentionDays: 1
+      
+      - uses: actions/download-artifact@v8
+        with:
+          name: smoketest-assets-1.2.0
+          path: assets
+      
+      - uses: actions/download-artifact@v8
+        with:
+          name: smoketest-dist
+          path: dist
+      
+      - name: Check artifacts
+        env:
+          STATUS: ${{ steps.upload.outputs.status }}
+        run: |
+          test "$STATUS" = released
+          test "$(cat "assets/app linux")" = linux
+          test "$(cat assets/app.exe)" = windows
+          test "$(cat dist/nested/latest.json)" = '{}'
+          test "$(cat dist/app.exe)" = windows

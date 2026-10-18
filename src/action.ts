@@ -37,10 +37,12 @@ export async function main(
 			parseSteps(input("steps") || "- conventional"),
 			{ cwd },
 		);
+		const version = input("version");
 		report = await defineRelease({ steps }).run({
 			cwd,
 			dryRun: parseBoolean("dry-run", input("dry-run") || "false"),
 			reporter,
+			...(version && { release: { version, notes: input("notes") } }),
 		});
 	} catch (error) {
 		if (error instanceof ReleaseError) {

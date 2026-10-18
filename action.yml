@@ -14,6 +14,15 @@ inputs:
   dry-run:
     description: Run every step without side effects, reporting what each would do.
     default: "false"
+  version:
+    description: >
+      A version that's already been released, e.g. by an earlier job. Only the
+      `release` steps run, for this version, such as uploading files to its
+      GitHub release.
+    default: ""
+  notes:
+    description: The release notes, along with `version`.
+    default: ""
   working-directory:
     description: The project to release, relative to the workspace.
     default: "."

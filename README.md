@@ -62,6 +62,8 @@ rylease release · main · /home/runner/work/project/project
 |---|---|---|
 | `steps` | `- conventional` | The steps, as above. |
 | `dry-run` | `false` | Runs every step without side effects; each reports what it would do. |
+| `version` | | A version that's already been released, e.g. by an earlier job: only the `release` steps run, for it. |
+| `notes` | | The release notes, along with `version`. |
 | `working-directory` | `.` | The project to release, e.g. a package in a monorepo. |
 | `token` | `${{ github.token }}` | Used when `GITHUB_TOKEN` isn't set. |
 
@@ -91,6 +93,38 @@ steps:
 ```
 
 It publishes the version that `write-package-json` wrote, after the release is committed, tagged and pushed, and refuses to publish any other.
+
+### Uploading builds to the release
+
+Jobs that build after the release, say one per platform, can each upload their files to it. Pass the version (and notes) the release job worked out, and only the `release` steps run. Here the `release` job passes on rylease's `released`, `version` and `notes` outputs, and whether it was a dry run, as its own outputs:
+
+```yaml
+  build:
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: v${{ needs.release.outputs.version }}
+      - run: npm ci && npm run build
+      - uses: ryangarber/rylease@v1
+        with:
+          version: ${{ needs.release.outputs.version }}
+          notes: ${{ needs.release.outputs.notes }}
+          dry-run: ${{ needs.release.outputs.dry-run }}
+          steps: |
+            - github-release-assets:
+                files: ["dist/app-*"]
+                dryRunArtifact: true
+```
+
+`github-release-assets` uploads to the release that `github-release` created, or creates it if no job has yet. When several jobs race to, the losers wait for the winner's release and use it. Failed requests and uploads are retried, and an upload that failed halfway is cleared first. With `dryRunArtifact`, a dry run keeps the files as a workflow artifact instead, so a dry run of the whole pipeline leaves every build to download. `github-artifact` does the same for any files, in a dry run or not.
 
 ## TypeScript
 
@@ -131,7 +165,7 @@ await defineRelease({
 - **Chaining.** When several steps share a type, each later one receives the current value as an optional input (e.g. `notes?`). Whatever it returns replaces that value. `release` outputs accumulate instead.
 - **One source of truth.** A step takes what it needs from earlier phases and never works it out again. `ref` is the commit of the previous release, and changes are collected from there. `files` lists what a `release` step changed, and `git-commit` commits exactly those.
 - **Nothing to release.** If the final `release-kind` is `"none"`, the remaining steps are skipped.
-- **Dry run.** Steps get `env.dryRun`. Steps with side effects must do nothing and explain what they *would* have done.
+- **Dry run.** Steps get `env.dryRun`. Steps with side effects must do nothing and explain what they *would* have done. The one exception is `dryRunArtifact`, which keeps files as an artifact of the workflow run, which only that run sees.
 - **Audit.** `run()` resolves to a report with a record (type, name, status, duration, reason, output) for every step. On failure it rejects with a `ReleaseError` whose `.report` holds the same records.
 
 ### Custom steps
@@ -272,7 +306,7 @@ Commits the files earlier release steps changed, tags the commit and pushes both
 
 #### `github-release` · `release`
 
-Creates a GitHub release with the notes. Needs a token with `contents: write`.
+Creates a GitHub release with the notes, unless the tag already has one. Needs a token with `contents: write`.
 
 | Option | Type | Default | |
 |---|---|---|---|
@@ -286,6 +320,34 @@ Creates a GitHub release with the notes. Needs a token with `contents: write`.
 ### More steps
 
 These aren't in `conventional`; list them after it.
+
+#### `github-artifact` · `release`
+
+Uploads files as a workflow artifact. Only works in the GitHub Action.
+
+| Option | Type | Default | |
+|---|---|---|---|
+| `name` | `string` | required | The artifact's name, unique in the run; `{version}` is filled in. |
+| `files` | `string[]` | required | Paths, globs or directories, relative to the working directory unless absolute; each must match. |
+| `dryRunArtifact` | `boolean` | `false` | Upload in dry runs too. |
+| `retentionDays` | `integer` |  | Defaults to the repository's setting. |
+
+#### `github-release-assets` · `release`
+
+Uploads files to the GitHub release, creating it (with the notes) if no other job has yet.
+
+| Option | Type | Default | |
+|---|---|---|---|
+| `files` | `string[]` | required | Paths or globs, relative to the working directory unless absolute; each must match. |
+| `clobber` | `boolean` | `true` | Replace assets of the same name. |
+| `dryRunArtifact` | `boolean` | `false` | In dry runs, keep the files as a workflow artifact instead; only in the GitHub Action. |
+| `artifactName` | `string` |  | Unique in the run; `{version}` is filled in. Defaults to the asset's name, or for several, a name made from theirs. |
+| `tag` | `string` | `v{version}` | The release's tag; created at HEAD if it doesn't exist. |
+| `title` | `string` |  | `{version}` is filled in; defaults to the tag. |
+| `draft` | `boolean` | `false` |  |
+| `prerelease` | `boolean` | `false` |  |
+| `repo` | `string` |  | `owner/repo`; defaults to `GITHUB_REPOSITORY` or the `origin` remote. |
+| `token` | `string` |  | Defaults to `GITHUB_TOKEN` or `GH_TOKEN`. |
 
 #### `npm-publish` · `release`
 

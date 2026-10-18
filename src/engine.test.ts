@@ -120,6 +120,48 @@ describe("runRelease", () => {
 		});
 	});
 
+	it("runs only release steps for a given release", async () => {
+		const inputs: unknown[] = [];
+		const report = await defineRelease({
+			steps: [
+				...basics(),
+				{
+					type: "release",
+					name: "upload",
+					run: ({ env: _, context: __, history: ___, ...input }) => {
+						inputs.push(input);
+						return { output: null, reason: "uploaded" };
+					},
+				},
+			],
+		}).run({ ...options, release: { version: "2.1.0", notes: "Notes." } });
+		expect(report.status).toBe("released");
+		expect(report.records.map((r) => `${r.status}: ${r.reason}`)).toEqual([
+			...basics().map(() => "skipped: releasing the given 2.1.0"),
+			"ok: uploaded",
+		]);
+		expect(inputs).toEqual([
+			{
+				previousVersion: "2.1.0",
+				changes: [],
+				kind: "patch",
+				version: "2.1.0",
+				notes: "Notes.",
+				releases: [],
+			},
+		]);
+
+		const minor = await defineRelease({ steps: [] }).run({
+			...options,
+			release: { version: "2.1.0", previousVersion: "2.0.3" },
+		});
+		expect(minor).toMatchObject({
+			kind: "minor",
+			notes: "",
+			status: "released",
+		});
+	});
+
 	it("stops after the kind phase when there is nothing to release", async () => {
 		const report = await defineRelease({ steps: basics("none") }).run(options);
 		expect(report.status).toBe("unchanged");

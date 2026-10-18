@@ -65,6 +65,12 @@ describe("conventional preset", () => {
 	it("releases changes since the version in package.json", async () => {
 		const requests: { url: string; body: Record<string, unknown> }[] = [];
 		vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+			// No release yet: neither by tag, nor among drafts.
+			if (init.method === "GET") {
+				return url.includes("/tags/")
+					? new Response("", { status: 404 })
+					: Response.json([]);
+			}
 			requests.push({ url, body: JSON.parse(String(init.body)) });
 			return Response.json({ id: 1, html_url: "https://example.com/r/1" });
 		});

@@ -84,6 +84,24 @@ describe("action", () => {
 		});
 	});
 
+	it("runs release steps for the version input", async () => {
+		const steps = "- github-release: { repo: me/demo }";
+		expect(
+			await main(
+				{ ...env(steps), INPUT_VERSION: "3.0.0", INPUT_NOTES: "Hi" },
+				null,
+			),
+		).toBe(0);
+		expect(await outputs()).toEqual({
+			status: "released",
+			released: "true",
+			"previous-version": "3.0.0",
+			version: "3.0.0",
+			kind: "patch",
+			notes: "Hi",
+		});
+	});
+
 	it("fails with annotations for invalid input", async () => {
 		const write = vi
 			.spyOn(process.stdout, "write")

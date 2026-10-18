@@ -10,6 +10,7 @@ import {
 	type NotesOutput,
 	PHASES,
 	type PreviousVersionOutput,
+	type ReleaseKind,
 	type ReleaseOutput,
 	type ReleaseResult,
 	type Step,
@@ -18,6 +19,7 @@ import {
 	type StepType,
 } from "./types.ts";
 import { tryGit } from "./utils/git.ts";
+import { parseVersion } from "./utils/semver.ts";
 
 export interface RunOptions {
 	/** Defaults to `process.cwd()`. */
@@ -28,6 +30,22 @@ export interface RunOptions {
 	dryRun?: boolean;
 	/** Defaults to pretty output on stdout; pass `null` for silence. */
 	reporter?: Reporter | null;
+	/**
+	 * A release that's already been worked out, e.g. by an earlier job: only
+	 * the `release` steps run, for this version, and every other step is
+	 * skipped.
+	 */
+	release?: GivenRelease;
+}
+
+export interface GivenRelease {
+	version: string;
+	/** Defaults to none. */
+	notes?: string;
+	/** Defaults to the version itself. */
+	previousVersion?: string;
+	/** Defaults to the difference between the versions, or `patch`. */
+	kind?: ReleaseKind;
 }
 
 export type ReleaseStatus = "released" | "unchanged" | "failed";
@@ -94,6 +112,7 @@ export async function runRelease<Ctx>(
 	};
 	const reporter =
 		options.reporter === undefined ? defaultReporter() : options.reporter;
+	const given = options.release;
 	const ordered = sortSteps(steps);
 
 	const state: State = {
@@ -105,6 +124,16 @@ export async function runRelease<Ctx>(
 		notes: undefined,
 		releases: [],
 	};
+	if (given) {
+		const previousVersion = given.previousVersion ?? given.version;
+		Object.assign(state, {
+			previousVersion,
+			changes: [],
+			kind: given.kind ?? difference(previousVersion, given.version),
+			version: given.version,
+			notes: given.notes ?? "",
+		});
+	}
 	const records: StepRecord[] = [];
 	const report = (status: ReleaseStatus, error?: unknown): ReleaseReport => ({
 		env,
@@ -136,9 +165,11 @@ export async function runRelease<Ctx>(
 
 	reporter?.start?.(env, ordered);
 
-	const missing = REQUIRED_PHASES.filter(
-		(type) => !ordered.some((step) => step.type === type),
-	);
+	const missing = given
+		? []
+		: REQUIRED_PHASES.filter(
+				(type) => !ordered.some((step) => step.type === type),
+			);
 	if (missing.length > 0) {
 		const error = new Error(`no step provided for: ${missing.join(", ")}`);
 		const result = report("failed", error);
@@ -147,6 +178,18 @@ export async function runRelease<Ctx>(
 	}
 
 	for (const [index, step] of ordered.entries()) {
+		if (given && step.type !== "release") {
+			const record: StepRecord = {
+				type: step.type,
+				name: step.name,
+				status: "skipped",
+				durationMs: 0,
+				reason: `releasing the given ${given.version}`,
+			};
+			records.push(record);
+			reporter?.step?.(record);
+			continue;
+		}
 		// Past the kind phase, a `none` kind means there's nothing to release.
 		if (state.kind === "none" && phaseIndex(step.type) > KIND_PHASE) {
 			skipRest(index, "no release-worthy changes");
@@ -214,6 +257,15 @@ export async function runRelease<Ctx>(
 	const result = report(state.kind === "none" ? "unchanged" : "released");
 	reporter?.finish?.(result);
 	return result;
+}
+
+/** `major`, `minor` or `patch`: the highest part that differs. */
+function difference(from: string, to: string): ReleaseKind {
+	const a = parseVersion(from);
+	const b = parseVersion(to);
+	if (a.major !== b.major) return "major";
+	if (a.minor !== b.minor) return "minor";
+	return "patch";
 }
 
 function apply(
