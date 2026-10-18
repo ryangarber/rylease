@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { defineRelease, defineStep } from "./define.ts";
 import { ReleaseError, type ReleaseReport } from "./engine.ts";
 import { prettyReporter } from "./reporter.ts";
-import type { Kind, Step } from "./types.ts";
+import type { Kind, Step, StepInput } from "./types.ts";
 
 const options = { cwd: "/", branch: "main", reporter: null };
 
@@ -118,6 +118,46 @@ describe("runRelease", () => {
 			steps: 5,
 			calls: ["inspect"],
 		});
+	});
+
+	it("skips steps whose condition is false", async () => {
+		const ran: string[] = [];
+		const release = (
+			name: string,
+			condition?: (input: StepInput<"release">) => boolean,
+		) => ({
+			type: "release" as const,
+			name,
+			...(condition && {
+				if: Object.assign(condition, { source: `${name}?` }),
+			}),
+			run: () => {
+				ran.push(name);
+				return { output: name, reason: `ran ${name}` };
+			},
+		});
+		const report = await defineRelease({
+			steps: [
+				...basics(),
+				release("a"),
+				release("b", () => false),
+				release("c", ({ releases }) => releases.some((r) => r.name === "a")),
+			],
+		}).run(options);
+		expect(report.status).toBe("released");
+		expect(ran).toEqual(["a", "c"]);
+		expect(
+			report.records.slice(-2).map((r) => `${r.status}: ${r.reason}`),
+		).toEqual(["skipped: `b?` is false", "ok: ran c"]);
+	});
+
+	it("fails when conditions skip every step of a phase", async () => {
+		const steps = basics().map((step) =>
+			step.type === "release-version" ? { ...step, if: () => false } : step,
+		) as Step[];
+		await expect(defineRelease({ steps }).run(options)).rejects.toThrow(
+			"release-notes step 'fixed' failed: no 'release-version' step ran, so it has no version",
+		);
 	});
 
 	it("runs only release steps for a given release", async () => {

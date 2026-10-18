@@ -164,9 +164,20 @@ export type StepInput<T extends StepType, Ctx = unknown> = StepResults[T] & {
 	history: readonly StepRecord[];
 };
 
+/**
+ * Whether a step runs, decided just before it would, from what it would
+ * receive. `source` describes it in reports, e.g. the expression it came from.
+ */
+export interface StepCondition<T extends StepType, Ctx = unknown> {
+	(input: StepInput<T, Ctx>): boolean;
+	readonly source?: string;
+}
+
 export interface StepDefinition<T extends StepType, Ctx = unknown> {
 	type: T;
 	name: string;
+	/** When set, the step only runs if this returns true; otherwise it's skipped. */
+	if?: StepCondition<T, Ctx>;
 	run: (input: StepInput<T, Ctx>) => StepOutputs[T] | Promise<StepOutputs[T]>;
 }
 

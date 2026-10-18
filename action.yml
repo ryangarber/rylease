@@ -7,10 +7,11 @@ branding:
 inputs:
   steps:
     description: >
-      The steps to run, as a YAML list. Each entry is a step or preset name, or
-      a map of one name to its options. Names can be bundled steps, paths to
-      files (./release/announce.ts), or installed packages (pkg or pkg#export).
-    default: "- conventional"
+      The steps to run, as a YAML list, like a workflow's: each entry `uses` a
+      step or preset, passes it options `with`, and may run only `if` an
+      expression holds. Steps can be bundled ones, paths to files
+      (./release/announce.ts), or installed packages (pkg or pkg#export).
+    default: "- uses: conventional"
   dry-run:
     description: Run every step without side effects, reporting what each would do.
     default: "false"
@@ -26,6 +27,9 @@ inputs:
   working-directory:
     description: The project to release, relative to the workspace.
     default: "."
+  summary:
+    description: Write a summary of the release to the job's page.
+    default: "true"
   token:
     description: Used for GitHub API calls when GITHUB_TOKEN isn't set.
     default: ${{ github.token }}

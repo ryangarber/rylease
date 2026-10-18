@@ -66,11 +66,19 @@ jobs:
           working-directory: fixture
           dry-run: true
           steps: |
-            - conventional:
+            - uses: conventional
+              with:
                 github-release: { repo: me/fixture }
-            - npm-publish
-            - ./release/hello.ts:
+            - uses: npm-publish
+            - uses: ./release/hello.ts
+              if: kind == 'minor' && steps.semver.output.version == '1.1.0'
+              with:
                 to: ci
+            # Would fail: the fixture has no remote to release to.
+            - uses: github-release-assets
+              if: "!dryRun"
+              with:
+                files: [package.json]
         
       - name: Check test result
         env:
@@ -101,11 +109,13 @@ jobs:
           version: 1.2.0
           dry-run: true
           steps: |
-            - github-release-assets:
+            - uses: github-release-assets
+              with:
                 files: ["dist/app*"]
                 dryRunArtifact: true
                 artifactName: smoketest-assets-{version}
-            - github-artifact:
+            - uses: github-artifact
+              with:
                 name: smoketest-dist
                 files: [dist]
                 dryRunArtifact: true

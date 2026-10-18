@@ -46,15 +46,18 @@ async function problems(entries: unknown): Promise<readonly string[]> {
 }
 
 describe("resolveWorkflowSteps", () => {
-	it("takes bundled steps and presets, by name or with options", async () => {
-		expect(await names(["semver", { "conventional-kind": null }])).toEqual([
-			"semver",
-			"conventional-kind",
-		]);
+	it("takes bundled steps and presets, with options", async () => {
+		expect(
+			await names([
+				{ uses: "semver" },
+				{ uses: "conventional-kind", with: null },
+			]),
+		).toEqual(["semver", "conventional-kind"]);
 		expect(
 			await names([
 				{
-					conventional: {
+					uses: "conventional",
+					with: {
 						"github-release": false,
 						"read-git-tag": false,
 						semver: { shiftPreMajor: false },
@@ -75,51 +78,102 @@ describe("resolveWorkflowSteps", () => {
 
 	it("loads steps and presets from files", async () => {
 		const [step] = await resolveWorkflowSteps(
-			[{ "./announce.ts": { channel: "#releases" } }],
+			[{ uses: "./announce.ts", with: { channel: "#releases" } }],
 			{ cwd },
 		);
 		expect(step?.name).toBe("announce");
 		expect(
-			await names([{ "./announce.ts#both": { announce: { channel: "x" } } }]),
+			await names([
+				{ uses: "./announce.ts#both", with: { announce: { channel: "x" } } },
+			]),
 		).toEqual(["announce"]);
+	});
+
+	it("makes steps, and every step of a preset, conditional", async () => {
+		const [step] = await resolveWorkflowSteps(
+			[{ uses: "semver", if: "!dryRun && startsWith(branch, 'release/')" }],
+			{ cwd },
+		);
+		const input = (dryRun: boolean, branch: string) =>
+			({
+				env: { cwd, branch, dryRun },
+				history: [],
+				context: undefined,
+			}) as never;
+		expect(step?.if?.source).toBe("!dryRun && startsWith(branch, 'release/')");
+		expect(step?.if?.(input(false, "release/2"))).toBe(true);
+		expect(step?.if?.(input(true, "release/2"))).toBe(false);
+		expect(step?.if?.(input(false, "main"))).toBe(false);
+
+		const preset = await resolveWorkflowSteps(
+			[{ uses: "conventional", if: false }],
+			{ cwd },
+		);
+		expect(preset.map((s) => s.if?.(input(false, "main")))).toEqual(
+			preset.map(() => false),
+		);
 	});
 
 	it("reports problems with their path", async () => {
 		expect(await problems({ semver: {} })).toEqual([
 			"steps: expected a list of steps",
 		]);
-		expect(await problems([{ a: 1, b: 2 }])).toEqual([
-			"steps[0]: expected a step name, or a map of one step name to its options",
+		expect(await problems(["semver"])).toEqual([
+			"steps[0]: expected a map with 'uses', and optionally 'with' and 'if'",
 		]);
-		expect(await problems(["semver", { semver: { shift: true } }])).toEqual([
-			'steps[1].semver: Unrecognized key: "shift"',
+		expect(await problems([{ semver: {} }])).toEqual([
+			"steps[0].semver: unknown key; use uses, with, if",
+		]);
+		expect(await problems([{ uses: "semver", with: [] }])).toEqual([
+			"steps[0].with: expected a map of options",
 		]);
 		expect(
-			await problems([{ conventional: { semver: { shiftPreMajor: 1 } } }]),
+			await problems([
+				{ uses: "semver" },
+				{ uses: "semver", with: { shift: true } },
+			]),
+		).toEqual(['steps[1].with: Unrecognized key: "shift"']);
+		expect(
+			await problems([
+				{ uses: "conventional", with: { semver: { shiftPreMajor: 1 } } },
+			]),
 		).toEqual([
-			"steps[0].conventional.semver.shiftPreMajor: Invalid input: expected boolean, received number",
+			"steps[0].with.semver.shiftPreMajor: Invalid input: expected boolean, received number",
 		]);
-		expect(await problems([{ "./announce.ts": {} }])).toEqual([
-			"steps[0].announce.channel: Invalid input: expected string, received undefined",
+		expect(
+			await problems([{ uses: "conventional", with: { nope: false } }]),
+		).toEqual([
+			"steps[0].with: 'nope' isn't one of its steps (read-package-json, read-git-tag, conventional-commits, conventional-kind, semver, conventional-notes, write-package-json, prepend-changelog, git-commit, github-release)",
 		]);
-		expect(await problems(["nope"])).toEqual([
-			expect.stringMatching(/^steps\[0\]\.nope: unknown step; use one of /),
+		expect(await problems([{ uses: "./announce.ts" }])).toEqual([
+			"steps[0].with.channel: Invalid input: expected string, received undefined",
 		]);
-		expect(await problems(["./announce.ts#notAStep"])).toEqual([
-			`steps[0]["./announce.ts#notAStep"]: export 'notAStep' of ./announce.ts isn't a step made with defineStep or a preset made with definePreset`,
+		expect(await problems([{ uses: "nope" }])).toEqual([
+			expect.stringMatching(/^steps\[0\]\.uses: unknown step; use one of /),
+		]);
+		expect(await problems([{ uses: "./announce.ts#notAStep" }])).toEqual([
+			"steps[0].uses: export 'notAStep' of ./announce.ts isn't a step made with defineStep or a preset made with definePreset",
+		]);
+		expect(await problems([{ uses: "semver", if: "version ==" }])).toEqual([
+			"steps[0].if: unexpected end in `version ==`",
+		]);
+		expect(await problems([{ uses: "semver", if: "github.ref" }])).toEqual([
+			expect.stringMatching(
+				/^steps\[0\]\.if: unknown name 'github'; use dryRun, .+ in `github\.ref`$/,
+			),
 		]);
 	});
 
 	it("rejects a step that its preset already has", async () => {
 		expect(
-			await problems(["conventional", { "conventional-kind": {} }]),
+			await problems([{ uses: "conventional" }, { uses: "conventional-kind" }]),
 		).toEqual([
-			"steps[1].conventional-kind: 'conventional-kind' is already in 'conventional'; configure it there (conventional: { conventional-kind: ... }), or set it to false there to replace it",
+			"steps[1].uses: 'conventional-kind' is already in 'conventional'; configure it there (with: { conventional-kind: ... }), or set it to false there to replace it",
 		]);
 		expect(
 			await names([
-				{ conventional: { "conventional-kind": false } },
-				"conventional-kind",
+				{ uses: "conventional", with: { "conventional-kind": false } },
+				{ uses: "conventional-kind", if: "!dryRun" },
 			]),
 		).toContain("conventional-kind");
 	});

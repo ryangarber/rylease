@@ -9,6 +9,7 @@ import {
 } from "./options.ts";
 import type {
 	Step,
+	StepCondition,
 	StepDefinition,
 	StepInput,
 	StepOutputs,
@@ -195,4 +196,23 @@ export function definePreset<
 		description: { value: definition.description, enumerable: true },
 		steps: { value: definition.steps, enumerable: true },
 	}) as unknown as Preset<N, F>;
+}
+
+/**
+ * Makes a step run only when `condition` holds, on top of any condition it
+ * already has: `when(steps.npmPublish(), ({ env }) => !env.dryRun)`.
+ */
+export function when<T extends StepType, Ctx = unknown>(
+	step: StepDefinition<T, Ctx>,
+	condition: StepCondition<T, Ctx>,
+): StepDefinition<T, Ctx> {
+	const own = step.if;
+	const source = condition.source ?? "its condition";
+	const combined: StepCondition<T, Ctx> = own
+		? Object.assign(
+				(input: StepInput<T, Ctx>) => condition(input) && own(input),
+				{ source: `${source} && ${own.source ?? "its own condition"}` },
+			)
+		: condition;
+	return { ...step, if: combined };
 }

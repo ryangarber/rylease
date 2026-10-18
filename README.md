@@ -19,21 +19,24 @@ steps:
   - uses: actions/checkout@v7
     with:
       fetch-depth: 0 # full history is needed to find the previous release
-  - uses: ryangarber/rylease@v1
+  - uses: ryangarber/rylease@v2
 ```
 
-That runs the bundled `conventional` preset. To configure it, or add more steps, use `steps`: a YAML list where each entry is a name, or a map of one name to its options.
+That runs the bundled `conventional` preset. To configure it, or add more steps, use `steps`: a list shaped like a workflow's. Each entry `uses` a step or preset, gives it options `with`, and may run only `if` an expression holds.
 
 ```yaml
-  - uses: ryangarber/rylease@v1
+  - uses: ryangarber/rylease@v2
     with:
       steps: |
-        - conventional:
+        - uses: conventional
+          with:
             github-release: { draft: true }
             conventional-kind:
               types: { docs: none, chore: none, "chore(deps)": patch }
             prepend-changelog: false
-        - ./.github/release/announce.ts:
+        - uses: ./.github/release/announce.ts
+          if: "!dryRun && kind != 'patch'"
+          with:
             channel: "#releases"
 ```
 
@@ -54,20 +57,47 @@ rylease release · main · /home/runner/work/project/project
   1.0.0 → 1.1.0 (minor) · released
 ```
 
-- **Names** can be a bundled step or preset, a path to a file (`./release/announce.ts`, its default export), or an installed package (`some-package`, or `some-package#namedExport`). `.ts` files run as they are; they can `import { defineStep, z } from "rylease"` without installing it.
-- **Presets** take options for each of their steps by name. `false` leaves a step out, for instance to replace it with your own. Listing a step that a preset already has is an error, so nothing runs twice by accident.
-- **Options** are checked before anything runs. A typo fails the job with its exact location, e.g. `steps[0].conventional.semver: Unrecognized key: "shift"`.
+- **`uses`** names a bundled step or preset, a path to a file (`./release/announce.ts`, its default export), or an installed package (`some-package`, or `some-package#namedExport`). `.ts` files run as they are; they can `import { defineStep, z } from "rylease"` without installing it.
+- **`with`** holds the options. A preset takes options for each of its steps by name, and `false` leaves a step out, for instance to replace it with your own, or to list it again with an `if`. Listing a step that a preset already has is an error, so nothing runs twice by accident.
+- **`if`** runs the step only when an expression holds; see [Conditions](#conditions). On a preset, it applies to each of its steps.
+- **Options** are checked before anything runs. A typo fails the job with its exact location, e.g. `steps[0].with.semver: Unrecognized key: "shift"`.
 
 | Input | Default | |
 |---|---|---|
-| `steps` | `- conventional` | The steps, as above. |
+| `steps` | `- uses: conventional` | The steps, as above. |
 | `dry-run` | `false` | Runs every step without side effects; each reports what it would do. |
 | `version` | | A version that's already been released, e.g. by an earlier job: only the `release` steps run, for it. |
 | `notes` | | The release notes, along with `version`. |
 | `working-directory` | `.` | The project to release, e.g. a package in a monorepo. |
+| `summary` | `true` | Writes the release, a row per step and the notes to the job's summary page. |
 | `token` | `${{ github.token }}` | Used when `GITHUB_TOKEN` isn't set. |
 
 Outputs: `status` (`released`, `unchanged` or `failed`), `released` (`true`/`false`), `previous-version`, `version`, `kind` and `notes`.
+
+### Conditions
+
+`if` is evaluated just before the step would run, so it can depend on what earlier steps did:
+
+```yaml
+- uses: npm-publish
+  if: "!dryRun && !startsWith(version, '0.')"
+- uses: ./release/announce.ts
+  if: kind == 'major' || contains(notes, 'security')
+- uses: ./release/link.ts
+  if: steps.github-release.output.url != null
+```
+
+| Name | |
+|---|---|
+| `dryRun`, `branch`, `cwd` | The run's environment. |
+| `previousVersion`, `previousRef`, `changes`, `kind`, `version`, `notes` | The release so far; a value is `null` until its phase has run. |
+| `steps.<name>` | Each step that ran before: its `type`, `status` (`ok` or `skipped`), `reason` and `output`. |
+
+Expressions are written like GitHub's: `'strings'` (`''` for a quote), numbers, `true`, `false` and `null`; `.name` and `['name']`; `!`, `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||` and parentheses; and `contains(text or list, value)`, `startsWith(text, prefix)` and `endsWith(text, suffix)`. Comparisons are exact, and case-sensitive. An `if` starting with `!` needs quotes in YAML.
+
+GitHub fills in `${{ ... }}` in `steps` before rylease reads it, so `if: ${{ github.event_name == 'workflow_dispatch' }}` works too and becomes `if: true` or `if: false`. If conditions skip every step of a phase, the next phase fails, since it has nothing to go on.
+
+In TypeScript, a condition is a function of what the step receives: `when(steps.npmPublish(), ({ env }) => !env.dryRun)`.
 
 ### Publishing to npm
 
@@ -83,11 +113,11 @@ steps:
       fetch-depth: 0
   - uses: pnpm/setup@v3
   - run: pnpm ci
-  - uses: ryangarber/rylease@v1
+  - uses: ryangarber/rylease@v2
     with:
       steps: |
-        - conventional
-        - npm-publish
+        - uses: conventional
+        - uses: npm-publish
     env:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }} # not needed with trusted publishing
 ```
@@ -113,13 +143,14 @@ Jobs that build after the release, say one per platform, can each upload their f
         with:
           ref: v${{ needs.release.outputs.version }}
       - run: npm ci && npm run build
-      - uses: ryangarber/rylease@v1
+      - uses: ryangarber/rylease@v2
         with:
           version: ${{ needs.release.outputs.version }}
           notes: ${{ needs.release.outputs.notes }}
           dry-run: ${{ needs.release.outputs.dry-run }}
           steps: |
-            - github-release-assets:
+            - uses: github-release-assets
+              with:
                 files: ["dist/app-*"]
                 dryRunArtifact: true
 ```
@@ -149,6 +180,8 @@ await defineRelease({
 		process.exitCode = 1; // the failure has already been printed
 	});
 ```
+
+`markdownSummary(report)` renders a report as the Markdown the action writes to the job summary.
 
 ## Steps
 

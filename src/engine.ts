@@ -82,6 +82,16 @@ function phaseIndex(type: StepType): number {
 /** Phases that must have at least one step for a release to be possible. */
 const REQUIRED_PHASES = PHASES.filter((type) => type !== "release");
 
+/** What each phase produces, where later phases read it. */
+const PHASE_VALUES = {
+	"previous-version": "previousVersion",
+	"release-changes": "changes",
+	"release-kind": "kind",
+	"release-version": "version",
+	"release-notes": "notes",
+	release: "releases",
+} as const satisfies Record<StepType, keyof State>;
+
 interface State {
 	previousVersion: string | undefined;
 	previousRef: string | undefined;
@@ -216,6 +226,28 @@ export async function runRelease<Ctx>(
 		const start = performance.now();
 		let output: StepOutputs[StepType];
 		try {
+			// Conditions may have skipped every step of an earlier phase.
+			for (const type of PHASES.slice(0, phaseIndex(step.type))) {
+				if (state[PHASE_VALUES[type]] === undefined) {
+					throw new Error(
+						`no '${type}' step ran, so it has no ${PHASE_VALUES[type]}`,
+					);
+				}
+			}
+			const condition = step.if as ((input: unknown) => boolean) | undefined;
+			if (condition && !condition(input)) {
+				const source = (condition as { source?: string }).source;
+				const record: StepRecord = {
+					type: step.type,
+					name: step.name,
+					status: "skipped",
+					durationMs: performance.now() - start,
+					reason: source ? `\`${source}\` is false` : "its condition is false",
+				};
+				records.push(record);
+				reporter?.step?.(record);
+				continue;
+			}
 			// `input` holds every value the step's phase requires, since every
 			// earlier phase is guaranteed to have run at least one step.
 			const run = step.run as (input: unknown) => unknown;

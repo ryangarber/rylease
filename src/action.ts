@@ -8,6 +8,7 @@ import { defineRelease } from "./define.ts";
 import { errorMessage, ReleaseError, type ReleaseReport } from "./engine.ts";
 import { OptionsError } from "./options.ts";
 import { prettyReporter, type Reporter } from "./reporter.ts";
+import { markdownProblems, markdownSummary } from "./summary.ts";
 import { resolveWorkflowSteps } from "./workflow.ts";
 
 export * from "./index.ts";
@@ -22,9 +23,11 @@ export async function main(
 		...(env.GITHUB_ACTIONS === "true" && { color: true }),
 	}),
 ): Promise<number> {
+	const input = (name: string) => env[`INPUT_${name.toUpperCase()}`] ?? "";
+	let summary = true;
 	let report: ReleaseReport;
 	try {
-		const input = (name: string) => env[`INPUT_${name.toUpperCase()}`] ?? "";
+		summary = parseBoolean("summary", input("summary") || "true");
 		const cwd = resolve(
 			env.GITHUB_WORKSPACE ?? process.cwd(),
 			input("working-directory") || ".",
@@ -34,7 +37,7 @@ export async function main(
 			process.env.GITHUB_TOKEN = token;
 		}
 		const steps = await resolveWorkflowSteps(
-			parseSteps(input("steps") || "- conventional"),
+			parseSteps(input("steps") || "- uses: conventional"),
 			{ cwd },
 		);
 		const version = input("version");
@@ -45,17 +48,21 @@ export async function main(
 			...(version && { release: { version, notes: input("notes") } }),
 		});
 	} catch (error) {
+		let issues: readonly string[];
 		if (error instanceof ReleaseError) {
 			// The reporter has printed the details.
-			annotate(error.message);
-		} else if (error instanceof OptionsError) {
-			for (const issue of error.issues) annotate(issue);
+			issues = [error.message];
+			if (summary) await writeSummary(env, markdownSummary(error.report));
 		} else {
-			annotate(errorMessage(error));
+			issues =
+				error instanceof OptionsError ? error.issues : [errorMessage(error)];
+			if (summary) await writeSummary(env, markdownProblems(issues));
 		}
+		for (const issue of issues) annotate(issue);
 		return 1;
 	}
 
+	if (summary) await writeSummary(env, markdownSummary(report));
 	await setOutputs(env.GITHUB_OUTPUT, {
 		status: report.status,
 		released: String(report.status === "released"),
@@ -65,6 +72,12 @@ export async function main(
 		notes: report.notes ?? "",
 	});
 	return 0;
+}
+
+/** Appends to the job summary, the Markdown GitHub shows on the run's page. */
+async function writeSummary(env: NodeJS.ProcessEnv, markdown: string) {
+	if (env.GITHUB_STEP_SUMMARY)
+		await appendFile(env.GITHUB_STEP_SUMMARY, markdown);
 }
 
 function parseSteps(text: string): unknown {

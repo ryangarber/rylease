@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, it } from "vitest";
-import { defineRelease, defineStep } from "./define.ts";
+import { defineRelease, defineStep, when } from "./define.ts";
 import { z } from "./options.ts";
 import * as presets from "./presets/index.ts";
 import * as steps from "./steps/index.ts";
@@ -136,5 +136,19 @@ describe("step options", () => {
 		presets.conventional({ nope: false });
 		// @ts-expect-error wrong option type
 		presets.conventional({ semver: { shiftPreMajor: "no" } });
+	});
+});
+
+describe("conditions", () => {
+	it("take what the step receives", () => {
+		defineRelease({
+			steps: [
+				...presets.conventional(),
+				when(
+					steps.npmPublish(),
+					({ env, version }) => !env.dryRun && version !== "",
+				),
+			],
+		});
 	});
 });

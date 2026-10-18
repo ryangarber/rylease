@@ -28,5 +28,6 @@ jobs:
         with:
           dry-run: ${{ github.event_name != 'workflow_dispatch' }}
           steps: |
-            - conventional:
+            - uses: conventional
+              with:
                 git-commit: { move: ["v{major}"] }

@@ -1,11 +1,22 @@
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { AnyStepFactory, Preset } from "./define.ts";
-import { joinPath, OptionsError } from "./options.ts";
+import { type AnyStepFactory, type Preset, when } from "./define.ts";
+import {
+	compileExpression,
+	ExpressionError,
+	expressionContext,
+} from "./expression.ts";
+import { OptionsError } from "./options.ts";
 import * as presets from "./presets/index.ts";
 import * as steps from "./steps/index.ts";
-import { PHASES, type Step } from "./types.ts";
+import {
+	PHASES,
+	type Step,
+	type StepDefinition,
+	type StepInput,
+	type StepType,
+} from "./types.ts";
 
 const builtins = new Map<string, AnyStepFactory | Preset>(
 	[...Object.values(steps), ...Object.values(presets)].map((item) => [
@@ -20,15 +31,19 @@ export interface WorkflowOptions {
 }
 
 /**
- * Turns workflow `steps` (already parsed from YAML) into steps. Each entry is a
- * name, or a map of one name to its options:
+ * Turns workflow `steps` (already parsed from YAML) into steps. Each entry
+ * names what it `uses`, passes it options `with`, and may run only `if` an
+ * expression holds:
  *
  * ```yaml
- * - conventional:              # a bundled preset or step
+ * - uses: conventional              # a bundled preset or step
+ *   with:
  *     github-release: false
- * - ./release/announce.ts:     # a file's default export
+ * - uses: ./release/announce.ts     # a file's default export
+ *   if: "!dryRun && kind != 'patch'"
+ *   with:
  *     channel: "#releases"
- * - some-package#slackNotes    # a package's named export
+ * - uses: some-package#slackNotes   # a package's named export
  * ```
  */
 export async function resolveWorkflowSteps(
@@ -42,30 +57,43 @@ export async function resolveWorkflowSteps(
 	const steps: Step[] = [];
 	// Which preset each step came from, to catch steps configured twice.
 	const fromPreset = new Map<string, string>();
-	const explicit: { name: string; path: string }[] = [];
+	const explicit: { name: string; at: string }[] = [];
 
-	for (const { name, value, at, path } of parsed) {
-		const target = await load(name, path, options.cwd);
+	for (const { uses, with: value, condition, at } of parsed) {
+		const target = await load(uses, `${at}.uses`, options.cwd);
+		let created: Step[];
 		try {
 			if (isPreset(target)) {
-				const created = target(value as never);
+				created = target(value as never);
 				for (const step of created) fromPreset.set(step.name, target.name);
-				steps.push(...created);
 			} else {
-				steps.push(target(value));
-				explicit.push({ name: target.name, path });
+				created = [target(value)];
+				explicit.push({ name: target.name, at });
 			}
 		} catch (error) {
 			if (!(error instanceof OptionsError)) throw error;
-			throw new OptionsError(error.issues.map((issue) => `${at}.${issue}`));
+			// Issues start with the step's or preset's name; point at `with`.
+			throw new OptionsError(
+				error.issues.map(
+					(issue) =>
+						`${at}.with${issue.startsWith(target.name) ? issue.slice(target.name.length) : `: ${issue}`}`,
+				),
+			);
 		}
+		steps.push(
+			...created.map((step) =>
+				condition
+					? (when(step as StepDefinition<StepType>, condition) as Step)
+					: step,
+			),
+		);
 	}
 
-	const twice = explicit.flatMap(({ name, path }) => {
+	const twice = explicit.flatMap(({ name, at }) => {
 		const preset = fromPreset.get(name);
 		return preset
 			? [
-					`${path}: '${name}' is already in '${preset}'; configure it there (${preset}: { ${name}: ... }), or set it to false there to replace it`,
+					`${at}.uses: '${name}' is already in '${preset}'; configure it there (with: { ${name}: ... }), or set it to false there to replace it`,
 				]
 			: [];
 	});
@@ -73,30 +101,74 @@ export async function resolveWorkflowSteps(
 	return steps;
 }
 
+const ENTRY_KEYS = ["uses", "with", "if"];
+
 function parseEntry(
 	entry: unknown,
 	index: number,
-): { name: string; value: unknown; at: string; path: string } {
+): { uses: string; with: unknown; condition?: Condition; at: string } {
 	const at = `steps[${index}]`;
-	if (typeof entry === "string" && entry !== "") {
-		return { name: entry, value: undefined, at, path: joinPath(at, [entry]) };
+	if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+		throw new OptionsError([
+			`${at}: expected a map with 'uses', and optionally 'with' and 'if'`,
+		]);
 	}
-	if (typeof entry === "object" && entry !== null && !Array.isArray(entry)) {
-		const keys = Object.keys(entry);
-		const [name] = keys;
-		if (keys.length === 1 && name) {
-			const value = (entry as Record<string, unknown>)[name];
-			return {
-				name,
-				value: value ?? undefined,
-				at,
-				path: joinPath(at, [name]),
-			};
-		}
+	const fields = entry as Record<string, unknown>;
+	const unknown = Object.keys(fields).filter(
+		(key) => !ENTRY_KEYS.includes(key),
+	);
+	if (unknown.length > 0) {
+		throw new OptionsError(
+			unknown.map(
+				(key) => `${at}.${key}: unknown key; use ${ENTRY_KEYS.join(", ")}`,
+			),
+		);
 	}
-	throw new OptionsError([
-		`${at}: expected a step name, or a map of one step name to its options`,
-	]);
+	if (typeof fields.uses !== "string" || fields.uses === "") {
+		throw new OptionsError([
+			`${at}.uses: expected the name of a step or preset`,
+		]);
+	}
+	if (
+		fields.with != null &&
+		(typeof fields.with !== "object" || Array.isArray(fields.with))
+	) {
+		throw new OptionsError([`${at}.with: expected a map of options`]);
+	}
+	const condition = parseCondition(fields.if, `${at}.if`);
+	return {
+		uses: fields.uses,
+		with: fields.with ?? undefined,
+		...(condition && { condition }),
+		at,
+	};
+}
+
+type Condition = { (input: StepInput<StepType>): boolean; source: string };
+
+/**
+ * `if:` is a rylease expression, or a boolean, e.g. what GitHub made of
+ * `${{ ... }}` before rylease ran.
+ */
+function parseCondition(value: unknown, at: string): Condition | undefined {
+	if (value === undefined || value === null) return undefined;
+	if (typeof value === "boolean") {
+		return Object.assign(() => value, { source: String(value) });
+	}
+	if (typeof value !== "string") {
+		throw new OptionsError([`${at}: expected an expression or a boolean`]);
+	}
+	try {
+		const evaluate = compileExpression(value);
+		return Object.assign(
+			(input: StepInput<StepType>) =>
+				Boolean(evaluate(expressionContext(input))),
+			{ source: value },
+		);
+	} catch (error) {
+		if (!(error instanceof ExpressionError)) throw error;
+		throw new OptionsError([`${at}: ${error.message} in \`${value}\``]);
+	}
 }
 
 async function load(

@@ -71,7 +71,8 @@ describe("action", () => {
 
 	it("passes options from the steps input", async () => {
 		const steps = [
-			"- conventional:",
+			"- uses: conventional",
+			"  with:",
 			"    github-release: false",
 			"    conventional-kind:",
 			"      types: { fix: none, docs: none }",
@@ -85,7 +86,7 @@ describe("action", () => {
 	});
 
 	it("runs release steps for the version input", async () => {
-		const steps = "- github-release: { repo: me/demo }";
+		const steps = "- uses: github-release\n  with: { repo: me/demo }";
 		expect(
 			await main(
 				{ ...env(steps), INPUT_VERSION: "3.0.0", INPUT_NOTES: "Hi" },
@@ -102,14 +103,48 @@ describe("action", () => {
 		});
 	});
 
+	it("writes a summary of the release, unless told not to", async () => {
+		const summary = join(root, "summary.md");
+		await writeFile(summary, "");
+		vi.stubEnv("GITHUB_REPOSITORY", "me/demo");
+		expect(await main({ ...env(), GITHUB_STEP_SUMMARY: summary }, null)).toBe(
+			0,
+		);
+		expect(await readFile(summary, "utf8")).toMatch(
+			/^### rylease dry run · \*\*1\.0\.0\*\* → \*\*1\.0\.1\*\* \(patch\) · would release\n/,
+		);
+
+		await writeFile(summary, "");
+		expect(
+			await main(
+				{ ...env(), GITHUB_STEP_SUMMARY: summary, INPUT_SUMMARY: "false" },
+				null,
+			),
+		).toBe(0);
+		expect(await readFile(summary, "utf8")).toBe("");
+
+		vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+		expect(
+			await main(
+				{ ...env("- uses: nope"), GITHUB_STEP_SUMMARY: summary },
+				null,
+			),
+		).toBe(1);
+		expect(await readFile(summary, "utf8")).toMatch(
+			/^### ❌ rylease · invalid input\n\n- steps\[0\]\.uses: unknown step/,
+		);
+	});
+
 	it("fails with annotations for invalid input", async () => {
 		const write = vi
 			.spyOn(process.stdout, "write")
 			.mockImplementation(() => true);
-		expect(await main(env("- semver: { shift: 1 }"), null)).toBe(1);
+		expect(await main(env("- uses: semver\n  with: { shift: 1 }"), null)).toBe(
+			1,
+		);
 		expect(await main(env("- [unclosed"), null)).toBe(1);
 		expect(write.mock.calls.map(([text]) => text)).toEqual([
-			'::error::steps[0].semver: Unrecognized key: "shift"\n',
+			'::error::steps[0].with: Unrecognized key: "shift"\n',
 			expect.stringMatching(/^::error::steps: invalid YAML: /),
 		]);
 		expect(await readFile(output, "utf8")).toBe("");
